@@ -21,7 +21,7 @@ CREATE_ARTIST_TABLE = (
 )
 
 CREATE_ALBUM_TABLE = (
-    "CREATE TABLE IF NOT EXISTS album (id SERIAL PRIMARY KEY, title TEXT, genre TEXT, release_date DATE, artist_id INTEGER ,FOREIGN KEY(artist_id) REFERENCES artist(id) ON DELETE CASCADE);"
+    "CREATE TABLE IF NOT EXISTS album (id SERIAL PRIMARY KEY, title TEXT, release_date DATE, total_tracks INTEGER, artist_id INTEGER ,FOREIGN KEY(artist_id) REFERENCES artist(id) ON DELETE CASCADE);"
 )
 
 CREATE_SONG_TABLE = """ CREATE TABLE IF NOT EXISTS song (
@@ -29,6 +29,10 @@ CREATE_SONG_TABLE = """ CREATE TABLE IF NOT EXISTS song (
                     );"""
 
 INSERT_INTO_ARTIST = ("INSERT INTO artist (name) VALUES (%s)")
+
+SELECT_ARTIST = ("SELECT id FROM artist WHERE name = (%s)")
+
+INSERT_INTO_ALBUM = ('INSERT INTO album (title,release_date,total_tracks,artist_id) VALUES (%s,%s,%s,%s)')
 
 
 
@@ -81,10 +85,26 @@ def many_artists():
 def get_artist_albums():
     albums_url = 'artists/{}/albums'
     artist_uri = '4LLpKhyESsyAXpc4laK94U'
-    response  = requests.get(base_url+albums_url.format(artist_uri),headers=headers)
+    response = requests.get(base_url+albums_url.format(artist_uri),headers=headers)
     data = response.json()
 
+    # can run a for loop for the data returned and for each album, grab the artist and match it with the artist in the db
+    for res in data['items']:
+        album_name = res['name']
+        release_date = res['release_date']
+        total_tracks = res['total_tracks']
+        artist_list = res['artists']
 
+        if len(artist_list) == 1 and total_tracks > 1:
+            artist = artist_list[0]['name']
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(SELECT_ARTIST,(artist,))
+
+                    for record in cur:
+                        artist_id = list(record)[0]
+
+                    cur.execute(INSERT_INTO_ALBUM,(album_name,release_date,total_tracks,artist_id))
     return data
 
 @app.get("/api/get-album-songs")
