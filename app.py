@@ -127,7 +127,7 @@ def search(query,type):
     response = requests.get(base_url+search_url,headers=headers)
     data = response.json()
 
-    if(type == 'track'):
+    if type == 'track':
         all_tracks = data['tracks']['items']
         for res in all_tracks:
             album_section = res['album']
@@ -156,12 +156,34 @@ def search(query,type):
 
                     cur.execute(INSERT_INTO_SONG,(song_name,song_duration,song_preview_link,artist_id,album_id))
 
+    if type == 'artist':
+        all_artists = data['artists']['items']
+        single_artist_section = all_artists[0]
+        artist_name = single_artist_section['name']
 
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(INSERT_INTO_ARTIST, (artist_name,))
 
+    if type == 'album':
+        all_albums = data['albums']['items']
 
+        for res in all_albums:
+            album_name = res['name']
+            release_date = res['release_date']
+            total_tracks = res['total_tracks']
+            artist_list = res['artists']
+            artist_name = artist_list[0]['name']
 
+            if total_tracks > 1:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute(SELECT_ARTIST, (artist_name,))
 
+                        for info in cur:
+                            artist_id = list(info)[0]
 
+                        cur.execute(INSERT_INTO_ALBUM, (album_name, release_date, total_tracks, artist_id))
 
 
     return data
