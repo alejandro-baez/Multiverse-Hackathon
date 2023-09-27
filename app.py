@@ -25,15 +25,25 @@ CREATE_ALBUM_TABLE = (
 )
 
 CREATE_SONG_TABLE = """ CREATE TABLE IF NOT EXISTS song (
-                        id SERIAL PRIMARY KEY
+                        id SERIAL PRIMARY KEY,
+                        title TEXT,
+                        duration_ms INTEGER,
+                        preview_url TEXT,
+                        artist_id INTEGER ,
+                        album_id INTEGER,
+                        FOREIGN KEY(artist_id) REFERENCES artist(id) ON DELETE CASCADE,
+                        FOREIGN KEY(album_id) REFERENCES album(id) ON DELETE CASCADE
                     );"""
 
 INSERT_INTO_ARTIST = ("INSERT INTO artist (name) VALUES (%s)")
 
 SELECT_ARTIST = ("SELECT id FROM artist WHERE name = (%s)")
 
+SELECT_ALBUM = ('SELECT id FROM album WHERE title = (%s)')
+
 INSERT_INTO_ALBUM = ('INSERT INTO album (title,release_date,total_tracks,artist_id) VALUES (%s,%s,%s,%s)')
 
+INSERT_INTO_SONG = 'INSERT INTO song (title,duration_ms, preview_url,artist_id,album_id) VALUES (%s,%s, %s,%s,%s);'
 
 
 scheduler.add_job(generate_token, 'interval', minutes =30 ,start_date=datetime.now()+timedelta(0,5))
@@ -95,16 +105,65 @@ def get_artist_albums():
         total_tracks = res['total_tracks']
         artist_list = res['artists']
 
+
         if len(artist_list) == 1 and total_tracks > 1:
             artist = artist_list[0]['name']
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(SELECT_ARTIST,(artist,))
 
-                    for record in cur:
-                        artist_id = list(record)[0]
+                    for info in cur:
+                        artist_id = list(info)[0]
+
+
 
                     cur.execute(INSERT_INTO_ALBUM,(album_name,release_date,total_tracks,artist_id))
+    return data
+
+
+@app.get("/api/search-feature/<query>/<type>")
+def search(query,type):
+    search_url = f'search?q={query}&type={type}'
+    response = requests.get(base_url+search_url,headers=headers)
+    data = response.json()
+
+    if(type == 'track'):
+        all_tracks = data['tracks']['items']
+        for res in all_tracks:
+            album_section = res['album']
+            album_name = album_section['name']
+
+            artist_section = res['artists'][0]
+            artist_name = artist_section['name']
+
+            song_name = res['name']
+            song_duration = res['duration_ms']
+            song_preview_link = res['preview_url']
+
+            print(song_name)
+            print(song_preview_link)
+
+
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(SELECT_ALBUM,(album_name,))
+                    for info in cur:
+                        album_id = list(info)[0]
+
+                    cur.execute(SELECT_ARTIST,(artist_name,))
+                    for info in cur:
+                        artist_id = list(info)[0]
+
+                    cur.execute(INSERT_INTO_SONG,(song_name,song_duration,song_preview_link,artist_id,album_id))
+
+
+
+
+
+
+
+
+
     return data
 
 @app.get("/api/get-album-songs")
@@ -115,20 +174,13 @@ def get_album_songs():
     data = response.json()
     return data
 
-@app.get("/api/search-feature/<query>/<type>")
-def search(query,type):
-    search_url = f'search?q={query}&type={type}'
-    response = requests.get(base_url+search_url,headers=headers)
-    data = response.json()
-    return data
-
-
 
 if __name__ == "__main__":
     with conn:
         with conn.cursor() as cursor:
             cursor.execute(CREATE_ARTIST_TABLE)
             cursor.execute(CREATE_ALBUM_TABLE)
+            cursor.execute(CREATE_SONG_TABLE)
 
 
     app.run(debug=True)
