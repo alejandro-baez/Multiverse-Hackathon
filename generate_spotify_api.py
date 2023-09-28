@@ -15,16 +15,12 @@ data = {
     'client_id': client_id,
     'client_secret': client_secret,
 }
-
-
-
 def generate_token():
     response = requests.post(url, data=data)
     response_json = response.json()
     print("Obtaining Access Token ...")
-    print(response_json['access_token'])
-    print(type(response_json.get('access_token')))
     Token.api_token_val = response_json.get('access_token')
+
 
 scheduler = BackgroundScheduler(daemon=True)
 

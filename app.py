@@ -1,5 +1,6 @@
 from flask import Flask
 import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 import os
 from time import sleep
@@ -35,97 +36,51 @@ CREATE_SONG_TABLE = """ CREATE TABLE IF NOT EXISTS song (
                         FOREIGN KEY(album_id) REFERENCES album(id) ON DELETE CASCADE
                     );"""
 
-INSERT_INTO_ARTIST = ("INSERT INTO artist (name) VALUES (%s)")
 
 SELECT_ARTIST = ("SELECT id FROM artist WHERE name = (%s)")
 
 SELECT_ALBUM = ('SELECT id FROM album WHERE title = (%s)')
+
+SELECT_ALL_ARTISTS_SONGS = ("SELECT artist.name, song.title FROM artist INNER JOIN song ON artist.id = song.artist_id")
+
+SELECT_ARTIST_AND_SONGS = ("SELECT artist.name, song.title FROM artist, song WHERE artist.id = song.artist_id and artist.name = (%s)")
+
+SELECT_ARTIST_ALBUMS_SONGS = ("SELECT artist.name, album.title, album.release_date, album.total_tracks, song.title, song.duration_ms , song.preview_url FROM artist INNER JOIN song ON artist.id = song.artist_id INNER JOIN album ON album.id = song.album_id WHERE artist.name = (%s) ")
+
+INSERT_INTO_ARTIST = ("INSERT INTO artist (name) VALUES (%s)")
 
 INSERT_INTO_ALBUM = ('INSERT INTO album (title,release_date,total_tracks,artist_id) VALUES (%s,%s,%s,%s)')
 
 INSERT_INTO_SONG = 'INSERT INTO song (title,duration_ms, preview_url,artist_id,album_id) VALUES (%s,%s, %s,%s,%s);'
 
 
-scheduler.add_job(generate_token, 'interval', minutes =30 ,start_date=datetime.now()+timedelta(0,5))
+scheduler.add_job(generate_token, 'interval', minutes =59 ,start_date=datetime.now()+timedelta(0,5))
 scheduler.start()
 sleep(10)
-
-
-headers = {
-        'Authorization': 'Bearer {}'.format(Token.api_token_val)
-    }
-
-print('This is the token '+Token.api_token_val)
-
 
 app = Flask(__name__)
 
 conn = psycopg2.connect(f'dbname=hackathon_db user=postgres password={my_db_pw}')
 
-@app.get("/")
-def home():
-    return 'Welcome'
-
-@app.get("/api/get-artist")
-def single_artist():
-    artist1_endpoint = 'artists/0TnOYISbd1XYRBk9myaseg'
-    artist2_endpoint = "artists/4LLpKhyESsyAXpc4laK94U"
-    artist_url = "".join([base_url,artist2_endpoint])
-    response = requests.get(artist_url,headers=headers)
-    data = response.json()
-    print(data['name'])
-
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute(INSERT_INTO_ARTIST,(data['name'],))
-
-    return data
-
-@app.get("/api/get-many-artists")
-def many_artists():
-    many_artists_url = 'artists?ids={}'
-    many_artists_uri_list = ["4LLpKhyESsyAXpc4laK94U",'0TnOYISbd1XYRBk9myaseg']
-    chunk = ",".join(many_artists_uri_list)
-    response = requests.get(base_url+many_artists_url.format(chunk),headers=headers)
-    data = response.json()
-
-    return data
-
-@app.get("/api/get-artist-albums")
-def get_artist_albums():
-    albums_url = 'artists/{}/albums'
-    artist_uri = '4LLpKhyESsyAXpc4laK94U'
-    response = requests.get(base_url+albums_url.format(artist_uri),headers=headers)
-    data = response.json()
-
-    # can run a for loop for the data returned and for each album, grab the artist and match it with the artist in the db
-    for res in data['items']:
-        album_name = res['name']
-        release_date = res['release_date']
-        total_tracks = res['total_tracks']
-        artist_list = res['artists']
-
-
-        if len(artist_list) == 1 and total_tracks > 1:
-            artist = artist_list[0]['name']
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute(SELECT_ARTIST,(artist,))
-
-                    for info in cur:
-                        artist_id = list(info)[0]
-
-
-
-                    cur.execute(INSERT_INTO_ALBUM,(album_name,release_date,total_tracks,artist_id))
-    return data
-
 
 @app.get("/api/search-feature/<query>/<type>")
 def search(query,type):
     search_url = f'search?q={query}&type={type}'
+    headers = {
+        'Authorization': 'Bearer {}'.format(Token.api_token_val)
+    }
     response = requests.get(base_url+search_url,headers=headers)
     data = response.json()
+
+    if type == 'artist':
+        all_artists = data['artists']['items']
+        single_artist_section = all_artists[0]
+        artist_name = single_artist_section['name']
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(INSERT_INTO_ARTIST, (artist_name,))
+
 
     if type == 'track':
         all_tracks = data['tracks']['items']
@@ -140,10 +95,6 @@ def search(query,type):
             song_duration = res['duration_ms']
             song_preview_link = res['preview_url']
 
-            print(song_name)
-            print(song_preview_link)
-
-
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(SELECT_ALBUM,(album_name,))
@@ -156,14 +107,6 @@ def search(query,type):
 
                     cur.execute(INSERT_INTO_SONG,(song_name,song_duration,song_preview_link,artist_id,album_id))
 
-    if type == 'artist':
-        all_artists = data['artists']['items']
-        single_artist_section = all_artists[0]
-        artist_name = single_artist_section['name']
-
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(INSERT_INTO_ARTIST, (artist_name,))
 
     if type == 'album':
         all_albums = data['albums']['items']
@@ -185,15 +128,76 @@ def search(query,type):
 
                         cur.execute(INSERT_INTO_ALBUM, (album_name, release_date, total_tracks, artist_id))
 
+    return data
+
+
+@app.get('/db/<artist_name>/all-songs')
+def artist_all_songs(artist_name):
+
+    data = {"artist" : artist_name,
+            'songs' : []
+            }
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+
+            curs.execute(SELECT_ARTIST_AND_SONGS,(artist_name,))
+
+            rows = curs.fetchall()
+
+            for row in rows:
+                data['songs'].append({'title':row[1]})
 
     return data
 
-@app.get("/api/get-album-songs")
-def get_album_songs():
-    album_tracks_url = 'albums/{}/tracks'
-    album_uri = "5SKnXCvB4fcGSZu32o3LRY"
-    response = requests.get(base_url + album_tracks_url.format(album_uri),headers=headers)
-    data = response.json()
+@app.get('/db/<artist_name>/all-songs-albums')
+def artist_all_songs_albums(artist_name):
+    data = {
+        'artist' : artist_name,
+        'album' : []
+    }
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as curs:
+            curs.execute(SELECT_ARTIST_ALBUMS_SONGS,(artist_name,))
+
+            rows = curs.fetchall()
+
+            for row in rows:
+                album_name = row[1]
+                album_release = row[2]
+                album_track_number = row[3]
+                song_title = row[4]
+                song_duration = row[5]
+                song_preview = row[6]
+                global has_been_added
+                has_been_added = False
+
+
+                all_albums_dictionary = data['album']
+
+                if len(all_albums_dictionary) == 0:
+                    all_albums_dictionary.append({album_name:{"total_tracks": album_track_number,
+                                                              "release_date":album_release,
+                                                              'song': [{'song_title' : song_title,
+                                                                        'song_duration': song_duration,
+                                                                        'song_preview': song_preview}
+                                                                       ]}})
+
+                else:
+                    for album in all_albums_dictionary:
+                        if album_name == list(album.keys())[0]:
+                            song_to_add = {'song_title' : song_title, 'song_duration': song_duration, 'song_preview': song_preview}
+                            album[album_name]['song'].append(song_to_add)
+                            has_been_added = True
+
+                    if has_been_added == False:
+                        all_albums_dictionary.append({album_name: {"total_tracks": album_track_number,
+                                                                   "release_date": album_release,
+                                                                   'song': [
+                                                                             {'song_title': song_title,
+                                                                              'song_duration': song_duration,
+                                                                              'song_preview': song_preview}
+                                                                   ]}})
+
     return data
 
 
@@ -203,7 +207,6 @@ if __name__ == "__main__":
             cursor.execute(CREATE_ARTIST_TABLE)
             cursor.execute(CREATE_ALBUM_TABLE)
             cursor.execute(CREATE_SONG_TABLE)
-
 
     app.run(debug=True)
 
